@@ -5,7 +5,7 @@ library('tidyverse')
 # setwd('')
 
 # ============== Meta Data ===================
-file_names <- list.files("/Users/nguyennguyen/Documents/Clinical Bioinfo/Analytic and Storytelling/MultiSpeciesTranscriptomics/raw_counts")
+file_names <- list.files("~/MultiSpeciesTranscriptomics/raw_counts")
 
 metadata_list = list()
 

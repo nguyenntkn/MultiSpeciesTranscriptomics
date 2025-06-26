@@ -74,6 +74,35 @@ write.csv(meta_data_df, file.path(work_dir, 'Data/zebrafish_brain_meta_data.csv'
 # Remove temp list to save space, may not be necessary if data is small
 rm(temp_meta_df_list)
 
+#---------------------------Data Exploration--------------------------------
+
+dim(count_data_df) # number of rows and columns
+head(count_data_df) # to see first 5 rows
+summary(count_data_df) # summary statistics
+colSums(is.na(count_data_df)) # to confirm that this is no missing data
+sum_zero=colSums(count_data_df == 0) # number of rows where expression = zero
+sum_not_zero=colSums(count_data_df != 0) # number of rows per column where expression is over zero
+
+#Spread of the non-zero counts
+
+long_counts <- count_data_df %>%
+  pivot_longer(
+    cols = everything(),  # All sample columns (assuming no gene name column)
+    names_to = "sample",
+    values_to = "express"
+  )%>%
+  filter(express > 0 & express < 100) 
+  
+
+ggplot(long_counts, aes(x = express)) +
+  geom_histogram(bins = 100) +
+  labs(
+    title = "Histogram of Raw Gene Expression (<100)",
+    x = "Expression Level",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+
 # ======================== 5. DESeq2 analysis ==================================
 
 # Make DESeqDataSet object for DESeq

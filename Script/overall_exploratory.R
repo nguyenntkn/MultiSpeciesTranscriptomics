@@ -114,9 +114,10 @@ rm(temp_count_df_list, temp_meta_df_list)
 
 
 
+# =========================== 4. Exploratory ===================================
 
-
-
+any(is.na(zebrafish_count_data_df)) # FALSE: No missing data
+any(is.na(killifish_count_data_df)) # TRUE: Contains missing data
 
 
 

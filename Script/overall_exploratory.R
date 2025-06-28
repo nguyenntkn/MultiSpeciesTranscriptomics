@@ -117,10 +117,35 @@ rm(temp_count_df_list, temp_meta_df_list)
 # =========================== 4. Exploratory ===================================
 
 any(is.na(zebrafish_count_data_df)) # FALSE: No missing data
-any(is.na(killifish_count_data_df)) # TRUE: Contains missing data
 
+dim(zebrafish_count_data_df) # number of rows and columns
+head(zebrafish_count_data_df) # to see first 5 rows
+summary(zebrafish_count_data_df) # summary statistics
+colSums(is.na(zebrafish_count_data_df)) # to confirm that this is no missing data
+sum_zero=colSums(zebrafish_count_data_df == 0) # number of rows where expression = zero
+sum_not_zero=colSums(zebrafish_count_data_df != 0) # number of rows per column where expression is over zero
 
+# Getting the number of samples per tissue
+table(zebrafish_meta_data_df$tissue)
 
+# Spread of the non-zero counts and less than 100 counts 
+long_counts <- zebrafish_count_data_df %>%
+  pivot_longer(
+    cols = everything(),  # All sample columns (assuming no gene name column)
+    names_to = "sample",
+    values_to = "express"
+  ) %>%
+ filter(express > 0 & express < 100) 
+
+# Plotting histogram 
+ggplot(long_counts, aes(x = express)) +
+  geom_histogram(bins = 100) +
+  labs(
+    title = "Histogram of Raw Gene Expression (<100)",
+    x = "Expression Level",
+    y = "Frequency"
+  ) +
+  theme_minimal()
 
 
 

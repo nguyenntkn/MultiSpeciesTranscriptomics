@@ -119,7 +119,7 @@ rm(temp_count_df_list, temp_meta_df_list)
 any(is.na(zebrafish_count_data_df)) # FALSE: No missing data
 
 dim(zebrafish_count_data_df) # number of rows and columns
-head(zebrafish_count_data_df) # to see first 5 rows
+head(zebrafish_count_data_df, 5) # to see first 5 rows
 summary(zebrafish_count_data_df) # summary statistics
 colSums(is.na(zebrafish_count_data_df)) # to confirm that this is no missing data
 sum_zero=colSums(zebrafish_count_data_df == 0) # number of rows where expression = zero

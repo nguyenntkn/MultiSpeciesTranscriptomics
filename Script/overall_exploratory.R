@@ -125,6 +125,9 @@ colSums(is.na(zebrafish_count_data_df)) # to confirm that this is no missing dat
 sum_zero=colSums(zebrafish_count_data_df == 0) # number of rows where expression = zero
 sum_not_zero=colSums(zebrafish_count_data_df != 0) # number of rows per column where expression is over zero
 
+print(mean(sum_zero))
+print(mean(sum_not_zero))
+
 # Getting the number of samples per tissue
 table(zebrafish_meta_data_df$tissue)
 

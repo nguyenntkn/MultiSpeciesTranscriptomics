@@ -9,7 +9,7 @@ library('dplyr')
 
 # ========================== 2. Work directory =================================
 # Change the work directory appropriately
-work_dir = '/Users/nguyennguyen/Documents/Clinical Bioinfo/Analytic and Storytelling/MultiSpeciesTranscriptomics'
+work_dir = '/Users/aleja/Documents/College/2025/Storytelling/MultiSpeciesTranscriptomics'
 setwd(work_dir)
 
 # ====================== 3. Making Count Data DF ===============================
@@ -106,14 +106,32 @@ ggplot(long_counts, aes(x = express)) +
 # ======================== 5. DESeq2 analysis ==================================
 
 # Make DESeqDataSet object for DESeq
+meta_data_df$time <- factor(meta_data_df$time, levels = c("12", "24", "36", "42"))
 dds <- DESeqDataSetFromMatrix(
   countData = count_data_df,
   colData = meta_data_df,
-  design = ~ time)
+  design = ~time)
 
 # Perform DEA
-dds <- DESeq(dds)
+dds <- DESeq(dds, test = "LRT", reduced = ~ 1)
 res <- results(dds)
+
+sig_genes <- res %>%
+  as.data.frame() %>%
+  filter(padj < 0.05) %>%
+  arrange(padj)
+
+top10_genes <- head(rownames(sig_genes), 10)
+
+for (gene in top10_genes) {
+  gene_data <- plotCounts(dds, gene = gene, intgroup = "time", returnData = TRUE)
+  p <- ggplot(gene_data, aes(x = time, y = count)) +
+    geom_jitter(width = 0.1, size = 2, color = "steelblue") +
+    stat_summary(fun = mean, geom = "line", aes(group = 1), color = "red") +
+    labs(title = gene, y = "Normalized Count") +
+    theme_minimal()
+  print(p)
+}
 
 # Volcano plot of DESeq2 results
 res_df <- as.data.frame(res) %>% # matrix out of results

@@ -4,12 +4,12 @@ library('DESeq2')
 library('pheatmap')
 library('msigdbr')
 library('fgsea')
-library('ggplot2')
-library('dplyr')
+# library('ggplot2')
+# library('dplyr')
 
 # ========================== 2. Work directory =================================
 # Change the work directory appropriately
-work_dir = '/Users/aleja/Documents/College/2025/Storytelling/MultiSpeciesTranscriptomics'
+work_dir = '/Users/nguyennguyen/Documents/Clinical Bioinfo/Analytic and Storytelling/MultiSpeciesTranscriptomics'
 setwd(work_dir)
 
 # ====================== 3. Making Count Data DF ===============================
@@ -38,7 +38,7 @@ count_data_df <- temp_count_df_list %>%
   column_to_rownames('gene')
 
 # Export count data
-write.csv(count_data_df, file.path(work_dir, 'Data/zebrafish_brain_count_data.csv'), row.names = FALSE) 
+write.csv(count_data_df, file.path(work_dir, 'Data/zebrafish_brain_count_data.csv'), row.names = TRUE) 
 
 # Temp list is quite large, remove to save storage space
 rm(temp_count_df_list)
@@ -103,6 +103,7 @@ ggplot(long_counts, aes(x = express)) +
   ) +
   theme_minimal()
 
+
 # ======================== 5. DESeq2 analysis ==================================
 
 # Make DESeqDataSet object for DESeq
@@ -119,24 +120,46 @@ res <- results(dds)
 sig_genes <- res %>%
   as.data.frame() %>%
   filter(padj < 0.05) %>%
-  arrange(padj)
+  # arrange(padj)
+  mutate(FC_logpval = log10(pvalue)*(2**log2FoldChange)) %>% 
+  arrange(FC_logpval)
 
-top10_genes <- head(rownames(sig_genes), 10)
 
-for (gene in top10_genes) {
-  gene_data <- plotCounts(dds, gene = gene, intgroup = "time", returnData = TRUE)
-  p <- ggplot(gene_data, aes(x = time, y = count)) +
-    geom_jitter(width = 0.1, size = 2, color = "steelblue") +
-    stat_summary(fun = mean, geom = "line", aes(group = 1), color = "red") +
-    labs(title = gene, y = "Normalized Count") +
-    theme_minimal()
-  print(p)
-}
+# Run PCA on log-transformed counts for better scaling
+vsd <- vst(dds, blind = TRUE)  # or use rlog(dds)
+log_counts_filtered <- assay(vsd)
+log_counts_filtered <- log_counts_filtered[apply(log_counts_filtered, 1, var) > 0, ]
+pca <- prcomp(t(log_counts_filtered), scale. = TRUE)
+
+# Extract sample coordinates
+pca_df <- as.data.frame(pca$x)
+pca_df$sample <- rownames(pca_df)
+pca_df <- merge(pca_df, meta_data_df, by.x = "sample", by.y = "row.names")
+
+# Plot with ggplot2
+ggplot(pca_df, aes(x = PC1, y = PC2, color = time)) +
+  geom_point(size = 3) +
+  labs(title = "PCA of Gene Expression", x = "PC1", y = "PC2") +
+  theme_minimal()
+
+# top10_genes <- head(rownames(sig_genes), 10)
+# 
+# for (gene in top10_genes) {
+#   gene_data <- plotCounts(dds, gene = gene, intgroup = "time", returnData = TRUE)
+#   p <- ggplot(gene_data, aes(x = time, y = count)) +
+#     geom_jitter(width = 0.1, size = 2, color = "steelblue") +
+#     stat_summary(fun = mean, geom = "line", aes(group = 1), color = "red") +
+#     labs(title = gene, y = "Normalized Count") +
+#     theme_minimal()
+#   print(p)
+# }
 
 # =============== 6. GSEA - Gene Set Enrichment Analysis =======================
 
 #Convert res object to dataframe
-res_df <- as.data.frame(res)
+res_df <- as.data.frame(res) %>% 
+  mutate(FC_logpval = log10(pvalue)*(2**log2FoldChange)) %>% 
+  arrange(FC_logpval)
 res_df <- res_df[!is.na(res_df$stat), ]  # remove NAs
 
 ### Load gene sets for GSEA
@@ -153,7 +176,7 @@ gene_sets_list <- split(zebrafish_gene_sets$ensembl_gene,
 
 ### Rank genes for GSEA analysis
 
-genes_ranks <- res_df$stat
+genes_ranks <- res_df$FC_logpval
 names(genes_ranks) <- rownames(res_df)
 genes_ranks <- sort(genes_ranks, decreasing = TRUE)
 

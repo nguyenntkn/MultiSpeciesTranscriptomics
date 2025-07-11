@@ -151,6 +151,8 @@ dds <- DESeqDataSetFromMatrix(countData = count_data_df,
 dds <- DESeq(dds, test = "LRT", reduced = ~1)
 res <- results(dds) %>% as.data.frame() %>% arrange(padj)
 
+
+
 # =============== 6. GSEA - Gene Set Enrichment Analysis =======================
 
 ### Load gene sets for GSEA
@@ -203,7 +205,7 @@ fgsea_skin <- run_gsea(res_skin, "skin")
 
 # ========================== 7. UMAP ==========================================
 
-vsd <- vst(dds, blind = TRUE)
+vsd <- vst(dds, blind = TRUE) # or use rlog(dds)
 
 # Get vst-transformed expression matrix
 vsd_mat <- assay(vsd)  # genes x samples
@@ -228,3 +230,20 @@ ggplot(umap_df, aes(x = UMAP1, y = UMAP2, color = tissue, shape = time)) +
   labs(title = "UMAP of VST-transformed RNA-seq data",
        subtitle = "Colored by tissue, shaped by age (months)")
 
+# -------------------------------------------------------
+
+# Run PCA on log-transformed counts for better scaling
+log_counts_filtered <- vsd_mat[apply(vsd_mat, 1, var) > 0, ]
+pca <- prcomp(t(log_counts_filtered), scale. = TRUE)
+
+# Extract sample coordinates
+pca_df <- as.data.frame(pca$x)
+pca_df$sample <- rownames(pca_df)
+pca_df <- merge(pca_df, meta_data_df, by.x = "sample", by.y = "row.names")
+
+# Plot with ggplot2
+ggplot(pca_df, aes(x = PC1, y = PC2, color = time, shape = tissue)) +
+  geom_point(size = 3) +
+  labs(title = "PCA of Gene Expression", x = "PC1", y = "PC2") +
+  theme_minimal()
+# -------------------------------------------------------

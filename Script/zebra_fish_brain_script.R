@@ -91,13 +91,13 @@ long_counts <- count_data_df %>%
     names_to = "sample",
     values_to = "express"
   )%>%
-  filter(express > 0 & express < 100) 
+  filter(express > 0 & express < 1000) 
   
 
 ggplot(long_counts, aes(x = express)) +
-  geom_histogram(bins = 100) +
+  geom_histogram(bins = 1000) +
   labs(
-    title = "Histogram of Raw Gene Expression (<100)",
+    title = "Histogram of Raw Gene Expression (<1000)",
     x = "Expression Level",
     y = "Frequency"
   ) +
@@ -133,52 +133,11 @@ for (gene in top10_genes) {
   print(p)
 }
 
-# Volcano plot of DESeq2 results
-res_df <- as.data.frame(res) %>% # matrix out of results
-  rownames_to_column("gene") %>%
-  mutate(significant = padj < 0.03)
-
-# volcano plot
-# x - >0 upregulated, <0 downregulated
-# y - statistical significance
-ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj), color = significant, shape = significant)) +
-  geom_point(alpha = 0.6) + 
-  xlim(c(-3, 3)) + 
-  labs(x = "Log2 Fold Change", y = "-Log10 Adjusted P-value", title = "Volcano Plot") +
-  theme_minimal()
-
-perform_DESeq2 <- function(dds, condition1, condition2) {
-  res <- results(dds, contrast=c("time", condition1, condition2))
-  res_df <- as.data.frame(res) %>% # converts to data frame
-    rownames_to_column("gene") %>% # adds gene names
-    # adds column with T/F if gene is statistically significant
-    mutate(significant = padj < 0.05, 
-           condition = ifelse(log2FoldChange > 0, # gene upregulated
-                              condition1, # in condition 1 (a gene in one condition)
-                              condition2)) # otherwise condition 2 (a gene in other condition)
-  res_df <- na.omit(res_df) # removes incomplete genes
-  # volcano plot
-  ggplot(res_df, aes(x=log2FoldChange, y=-log10(padj), color=significant, shape=condition)) +
-    geom_point(alpha=0.7, size=2) +
-    scale_color_manual(values = c("turquoise", "red")) +
-    scale_shape_manual(values = c(16, 17)) +
-    labs(title = paste("Volcano Plot:", condition1, "vs", condition2),
-         x = "Log2 Fold Change", y = "-Log10 Adjusted p-value") +
-    theme_minimal() +
-    theme(legend.position = "top")
-}
-
-# Plot volcano plots for each condition pair
-plot1 <- perform_DESeq2(dds, "12", "24")
-plot2 <- perform_DESeq2(dds, "12", "36")
-plot3 <- perform_DESeq2(dds, "12", "42")
-
-plot1
-plot2
-plot3
-
-
 # =============== 6. GSEA - Gene Set Enrichment Analysis =======================
+
+#Convert res object to dataframe
+res_df <- as.data.frame(res)
+res_df <- res_df[!is.na(res_df$stat), ]  # remove NAs
 
 ### Load gene sets for GSEA
 # MSigDB = Molecular Signatures Database
@@ -194,27 +153,27 @@ gene_sets_list <- split(zebrafish_gene_sets$ensembl_gene,
 
 ### Rank genes for GSEA analysis
 
-genes_ranked <- -log10(res$pvalue) * sign(res$log2FoldChange)
-names(genes_ranked) <- rownames(res)
-genes_ranked <- genes_ranked[!is.na(genes_ranked) & is.finite(genes_ranked)]
+genes_ranks <- res_df$stat
+names(genes_ranks) <- rownames(res_df)
+genes_ranks <- sort(genes_ranks, decreasing = TRUE)
 
 ### Perform GSEA
 set.seed(42)
 fgseaRes <- fgsea(pathways = gene_sets_list, 
-                  stats = genes_ranked,
-                  minSize = 15, # min no of genes a set should have to be tested
+                  stats = genes_ranks,
+                  minSize = 10, # min no of genes a set should have to be tested
                   maxSize = 500)
 
-head(fgseaRes[order(pval), ])
+### View Top Results
+head(fgseaRes[order(fgseaRes$padj), c("pathway", "NES", "pval", "padj")], 10)
 
 # Enrichment plot for a single pathway
-plotEnrichment(gene_sets_list[["GOCC_MITOCHONDRIAL_PROTEIN_CONTAINING_COMPLEX"]],
-               genes_ranked) + labs(title="GOCC_MITOCHONDRIAL_PROTEIN_CONTAINING_COMPLEX")
+plotEnrichment(gene_sets_list[["GOBP_RHYTHMIC_PROCESS"]],
+               genes_ranks) + labs(title="GOBP_RHYTHMIC_PROCESS")
 
 # Enrichment plot for several pathways (Top 10 pathways up vs Top 10 pathways down)
 topPathwaysUp <- fgseaRes[ES > 0][head(order(pval), n=10), pathway]
-topPathwaysDown <- fgseaRes[ES < 0][head(order(pval), n=10), pathway]
-topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
-plotGseaTable(gene_sets_list[topPathways], genes_ranked, fgseaRes, 
+topPathways <- topPathwaysUp
+plotGseaTable(gene_sets_list[topPathways], genes_ranks, fgseaRes, 
               gseaParam=0.5)
 

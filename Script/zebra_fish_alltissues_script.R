@@ -7,6 +7,10 @@ library('fgsea')
 library('ggplot2')
 library('dplyr')
 library('umap')
+library('grid')
+library('gridExtra')
+library('ggrepel')
+library('biomaRt')
 
 # ========================== 2. Work directory =================================
 # Change the work directory appropriately
@@ -46,7 +50,7 @@ write.csv(count_data_df, file.path(work_dir, "Data/zebrafish_all_count_data.csv"
 # Remove temp list to save space, may not be necessary if data is small
 rm(temp_count_df_list)
 
-# ====================== 4. Making Meta Data DF ================================
+# ====================== 5. Making Meta Data DF ================================
 
 # Prepare a list of meta data
 temp_meta_df_list <- list()
@@ -83,7 +87,7 @@ rm(temp_meta_df_list)
 ordered_samples <- meta_data_df$sample_ID
 count_data_df <- count_data_df[, ordered_samples]
 
-# ======================== 4. Data Exploration =================================
+# ======================== 6. Data Exploration =================================
 
 dim(count_data_df) # number of rows and columns
 head(count_data_df) # to see first 5 rows
@@ -112,7 +116,7 @@ ggplot(long_counts, aes(x = express)) +
   ) +
   theme_minimal()
 
-# ======================== 5. DESeq2 analysis ==================================
+# ======================== 7. DESeq2 analysis ==================================
 
 # === For Brain Tissue ===
 
@@ -147,11 +151,82 @@ res_skin <- results(dds_skin) %>% as.data.frame() %>% arrange(padj)
 # === For all 3 Tissues ===
 dds <- DESeqDataSetFromMatrix(countData = count_data_df,
                               colData = meta_data_df,
-                              design = ~ tissue)
+                              design = ~ tissue + time)
 dds <- DESeq(dds, test = "LRT", reduced = ~1)
 res <- results(dds) %>% as.data.frame() %>% arrange(padj)
 
-# =============== 6. GSEA - Gene Set Enrichment Analysis =======================
+#======================== 8. Volcano Plot ==================================
+
+Volcano_plot <- function(df, tissue){
+  ### Gene Annotation
+  # Connect to Ensembl BioMart for zebrafish gene information
+  ensembl <- useEnsembl(biomart = "genes", dataset = "drerio_gene_ensembl")
+  
+  # Extract Ensembl gene IDs from the row names of the input dataframe
+  ensembl_ids <- rownames(df)
+  
+  # Query BioMart to get corresponding gene symbols
+  gene_annotations <- getBM(
+    attributes = c("ensembl_gene_id", "external_gene_name"),
+    filters = "ensembl_gene_id",
+    values = ensembl_ids,
+    mart = ensembl
+  )
+
+  # Rename columns for clarity
+  colnames(gene_annotations) <- c("ensembl_id", "gene_symbol")
+  
+  ### Prepare Data for Volcano Plot 
+  volcano_df <- as.data.frame(df) %>%
+    filter(!is.na(padj) & !is.na(log2FoldChange)) %>%     # Remove rows with NA padj or fold change
+    mutate(ensembl_id = rownames(.)) %>%                  # Add Ensembl ID as a column for merging
+    left_join(gene_annotations, by = "ensembl_id") %>%    # Add gene symbols
+    mutate(
+      neg_log10_padj = -log10(padj),                      # Calculate -log10 adjusted p-value
+      significance = case_when(                           # Define significance category
+        padj < 0.05 & abs(log2FoldChange) > 1 ~ "Significant",
+        TRUE ~ "Not Significant"
+      ),
+      label = ifelse(is.na(gene_symbol), ensembl_id, gene_symbol)  # Label with gene symbol or Ensembl ID
+    )
+  
+  ### Select Genes to Label 
+  # Identify top 10 most significant genes (lowest padj) to label on the plot
+  top_genes <- volcano_df %>%
+    filter(significance == "Significant") %>%
+    arrange(padj) %>%
+    slice_head(n = 10)
+  
+  ### Create Volcano Plot 
+  ggplot(volcano_df, aes(x = log2FoldChange, y = neg_log10_padj, color = significance)) +
+    geom_point(alpha = 0.8, size = 1.5) +                                # Plot points
+    geom_text_repel(data = top_genes, aes(label = label), size = 3, max.overlaps = Inf) +  # Add labels
+    scale_color_manual(values = c("Significant" = "red", "Not Significant" = "gray")) +    # Color coding
+    coord_cartesian(xlim = c(-12, 12), ylim = c(0, 200)) +                    # Set fixed axis limits for consistency
+    geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "blue") +  # Fold change cutoffs
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +  # padj cutoffs
+    labs(
+      title = paste("Volcano Plot -", tissue, "Tissue"),
+      x = "Log2 Fold Change",
+      y = "-log10 Adjusted P-value"
+    ) +
+    theme_classic() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA),  # Add border around plot
+      legend.position = "none",                                 # Remove legend
+      plot.title = element_text(size = 18),
+      axis.title = element_text(size = 14),
+      axis.text = element_text(size = 12),
+      legend.title = element_text(size = 13),
+      legend.text = element_text(size = 11)
+    )
+}
+
+Volcano_plot(res_brain, "brain")
+Volcano_plot(res_liver, "liver")
+Volcano_plot(res_skin, "skin")
+
+# =============== 9. GSEA - Gene Set Enrichment Analysis =======================
 
 ### Load gene sets for GSEA
 # MSigDB = Molecular Signatures Database
@@ -184,16 +259,29 @@ run_gsea <- function(res_df, tissue_name) {
   # Enrichment plot for a single pathway
   p <- plotEnrichment(gene_sets_list[["GOBP_RHYTHMIC_PROCESS"]], genes_ranks) + 
     labs(title="GOBP_RHYTHMIC_PROCESS")
-  
 
   # Enrichment plot for several pathways (Top 10 pathways up vs Top 10 pathways down)
-  topPathwaysUp <- fgseaRes[ES > 0][head(order(pval), n=10), pathway]
-  topPathways <- topPathwaysUp
+  topPathwaysUp <- fgseaRes[ES > 0][head(order(pval), n=5), pathway]
+  topPathwaysDown <- fgseaRes[ES < 0][head(order(pval), n=5), pathway]
+  topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
   
   gsea_table_plot <- plotGseaTable(gene_sets_list[topPathways], genes_ranks, fgseaRes, gseaParam = 0.5)
-  grid::grid.newpage()
-  grid::grid.draw(gsea_table_plot)
-
+  
+  # Title grob for the GSEA table
+  title_grob <- textGrob(paste("Top 5 upregulated and downregulated pathways -", tissue_name),
+                         gp = gpar(fontsize = 16, fontface = "bold"))
+  
+  # Combine title and table grobs vertically
+  gsea_table_combined <- arrangeGrob(
+    grobs = list(title_grob, gsea_table_plot),
+    ncol = 1,
+    heights = unit.c(unit(1, "cm"), unit(1, "null"))
+  )
+  
+  # Draw combined plot
+  grid.newpage()
+  grid.draw(gsea_table_combined)
+  
   return(fgseaRes)
 }
 
@@ -201,30 +289,39 @@ fgsea_brain <- run_gsea(res_brain, "brain")
 fgsea_liver <- run_gsea(res_liver, "liver")
 fgsea_skin <- run_gsea(res_skin, "skin")
 
-# ========================== 7. UMAP ==========================================
+# ========================== 10. PCA ==========================================
 
-vsd <- vst(dds, blind = TRUE)
+pca_data <- prcomp(t(assay(vsd)))
+pca_df <- as.data.frame(pca_data$x)
+pca_df$sample_ID <- rownames(pca_df)
+pca_df <- left_join(pca_df, meta_data_df, by = "sample_ID")
 
-# Get vst-transformed expression matrix
-vsd_mat <- assay(vsd)  # genes x samples
-vsd_mat <- t(vsd_mat)  # transpose to samples x genes
+ggplot(pca_df, aes(x = PC1, y = PC2, color = tissue, shape = time)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  labs(title = "PCA of Gene Expression")
 
-# Run UMAP
-set.seed(42)
-umap_result <- umap(vsd_mat)  # Default settings work well for most RNA-seq
+# ================= 11. HEATMAP - All Tissues + Time ==========================
 
-# Format UMAP result for ggplot
-umap_df <- as.data.frame(umap_result$layout)
-colnames(umap_df) <- c("UMAP1", "UMAP2")
-umap_df$sample_ID <- rownames(umap_df)
+circadian_genes <- c(
+  "per1b", "clocka", "nr1d1", "bhlhe40", "cry2", "per2", "per3", "clockb", "cry3a", "cry3b", "timeless"
+)
 
-# Merge with metadata
-umap_df <- left_join(umap_df, meta_data_df, by = "sample_ID")
+circadian_ids <- c("ENSDARG00000012499", "ENSDARG00000011703", "ENSDARG00000033160", "ENSDARG00000004060", 
+                   "ENSDARG00000102403", "ENSDARG00000034503", "ENSDARG00000010519", "ENSDARG00000003631", 
+                   "ENSDARG00000069074", "ENSDARG00000091131", "ENSDARG00000078497")
 
-# Plot UMAP
-ggplot(umap_df, aes(x = UMAP1, y = UMAP2, color = tissue, shape = time)) +
-  geom_point(size = 3, alpha = 0.9) +
-  theme_minimal(base_size = 14) +
-  labs(title = "UMAP of VST-transformed RNA-seq data",
-       subtitle = "Colored by tissue, shaped by age (months)")
+gene_label_map <- setNames(circadian_genes, circadian_ids)
 
+# Plot
+vsd <- vst(dds, blind = FALSE)
+heatmap_circadian <- assay(vsd)[circadian_ids, ]
+rownames(heatmap_circadian) <- gene_label_map[rownames(heatmap_circadian)]
+annotation <- meta_data_df[, c("time", "tissue")]
+
+pheatmap(heatmap_circadian,
+         annotation_col = annotation,
+         cluster_rows = TRUE,
+         cluster_cols = FALSE,
+         labels_col = rep("", ncol(heatmap_circadian)),
+         main = "Circadian Genes Expression Heatmap")

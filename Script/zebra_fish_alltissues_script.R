@@ -157,54 +157,40 @@ res <- results(dds) %>% as.data.frame() %>% arrange(padj)
 
 #======================== 8. Volcano Plot ==================================
 
-Volcano_plot <- function(df, tissue){
-  ### Gene Annotation
-  # Connect to Ensembl BioMart for zebrafish gene information
-  ensembl <- useEnsembl(biomart = "genes", dataset = "drerio_gene_ensembl")
-  
-  # Extract Ensembl gene IDs from the row names of the input dataframe
-  ensembl_ids <- rownames(df)
-  
-  # Query BioMart to get corresponding gene symbols
-  gene_annotations <- getBM(
-    attributes = c("ensembl_gene_id", "external_gene_name"),
-    filters = "ensembl_gene_id",
-    values = ensembl_ids,
-    mart = ensembl
-  )
+circadian_genes <- c(
+  "per1b", "clocka", "nr1d1", "bhlhe40", "cry2", "per2", "per3", "clockb", "cry3a", "cry3b", "timeless"
+)
 
-  # Rename columns for clarity
-  colnames(gene_annotations) <- c("ensembl_id", "gene_symbol")
-  
-  ### Prepare Data for Volcano Plot 
+circadian_ids <- c("ENSDARG00000012499", "ENSDARG00000011703", "ENSDARG00000033160", "ENSDARG00000004060", 
+                   "ENSDARG00000102403", "ENSDARG00000034503", "ENSDARG00000010519", "ENSDARG00000003631", 
+                   "ENSDARG00000069074", "ENSDARG00000091131", "ENSDARG00000078497")
+
+gene_label_map <- setNames(circadian_genes, circadian_ids)
+
+Volcano_plot <- function(df, tissue) {
+  # Prepare data
   volcano_df <- as.data.frame(df) %>%
-    filter(!is.na(padj) & !is.na(log2FoldChange)) %>%     # Remove rows with NA padj or fold change
-    mutate(ensembl_id = rownames(.)) %>%                  # Add Ensembl ID as a column for merging
-    left_join(gene_annotations, by = "ensembl_id") %>%    # Add gene symbols
+    filter(!is.na(padj) & !is.na(log2FoldChange)) %>%
     mutate(
-      neg_log10_padj = -log10(padj),                      # Calculate -log10 adjusted p-value
-      significance = case_when(                           # Define significance category
+      ensembl_id = rownames(.),
+      neg_log10_padj = -log10(padj),
+      is_circadian = ensembl_id %in% names(gene_label_map),
+      label = ifelse(is_circadian, gene_label_map[ensembl_id], NA),
+      significance = case_when(
+        is_circadian ~ "Circadian",
         padj < 0.05 & abs(log2FoldChange) > 1 ~ "Significant",
         TRUE ~ "Not Significant"
-      ),
-      label = ifelse(is.na(gene_symbol), ensembl_id, gene_symbol)  # Label with gene symbol or Ensembl ID
+      )
     )
   
-  ### Select Genes to Label 
-  # Identify top 10 most significant genes (lowest padj) to label on the plot
-  top_genes <- volcano_df %>%
-    filter(significance == "Significant") %>%
-    arrange(padj) %>%
-    slice_head(n = 10)
-  
-  ### Create Volcano Plot 
+  # Plot
   ggplot(volcano_df, aes(x = log2FoldChange, y = neg_log10_padj, color = significance)) +
-    geom_point(alpha = 0.8, size = 1.5) +                                # Plot points
-    geom_text_repel(data = top_genes, aes(label = label), size = 3, max.overlaps = Inf) +  # Add labels
-    scale_color_manual(values = c("Significant" = "red", "Not Significant" = "gray")) +    # Color coding
-    coord_cartesian(xlim = c(-12, 12), ylim = c(0, 200)) +                    # Set fixed axis limits for consistency
-    geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "blue") +  # Fold change cutoffs
-    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "blue") +  # padj cutoffs
+    geom_point(alpha = 0.8, size = 1.5) +
+    geom_text_repel(data = subset(volcano_df, is_circadian), aes(label = label), size = 3, max.overlaps = Inf) +
+    scale_color_manual(values = c("Significant" = "red", "Circadian" = "blue", "Not Significant" = "gray")) +
+    coord_cartesian(xlim = c(-12, 12), ylim = c(0, 200)) +
+    geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "black") +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
     labs(
       title = paste("Volcano Plot -", tissue, "Tissue"),
       x = "Log2 Fold Change",
@@ -212,8 +198,8 @@ Volcano_plot <- function(df, tissue){
     ) +
     theme_classic() +
     theme(
-      panel.border = element_rect(color = "black", fill = NA),  # Add border around plot
-      legend.position = "none",                                 # Remove legend
+      panel.border = element_rect(color = "black", fill = NA),
+      legend.position = "right",
       plot.title = element_text(size = 18),
       axis.title = element_text(size = 14),
       axis.text = element_text(size = 12),
@@ -222,9 +208,9 @@ Volcano_plot <- function(df, tissue){
     )
 }
 
-Volcano_plot(res_brain, "brain")
-Volcano_plot(res_liver, "liver")
-Volcano_plot(res_skin, "skin")
+Volcano_plot(res_brain, "Brain")
+Volcano_plot(res_liver, "Liver")
+Volcano_plot(res_skin, "Skin")
 
 # =============== 9. GSEA - Gene Set Enrichment Analysis =======================
 
@@ -260,15 +246,14 @@ run_gsea <- function(res_df, tissue_name) {
   p <- plotEnrichment(gene_sets_list[["GOBP_RHYTHMIC_PROCESS"]], genes_ranks) + 
     labs(title="GOBP_RHYTHMIC_PROCESS")
 
-  # Enrichment plot for several pathways (Top 10 pathways up vs Top 10 pathways down)
+  # Enrichment plot for several pathways (Top 5 up-regulated pathways)
   topPathwaysUp <- fgseaRes[ES > 0][head(order(pval), n=5), pathway]
-  topPathwaysDown <- fgseaRes[ES < 0][head(order(pval), n=5), pathway]
-  topPathways <- c(topPathwaysUp, rev(topPathwaysDown))
+  topPathways <- c(topPathwaysUp)
   
   gsea_table_plot <- plotGseaTable(gene_sets_list[topPathways], genes_ranks, fgseaRes, gseaParam = 0.5)
   
   # Title grob for the GSEA table
-  title_grob <- textGrob(paste("Top 5 upregulated and downregulated pathways -", tissue_name),
+  title_grob <- textGrob(paste("Top 5 up-regulated pathways -", tissue_name),
                          gp = gpar(fontsize = 16, fontface = "bold"))
   
   # Combine title and table grobs vertically
@@ -285,9 +270,9 @@ run_gsea <- function(res_df, tissue_name) {
   return(fgseaRes)
 }
 
-fgsea_brain <- run_gsea(res_brain, "brain")
-fgsea_liver <- run_gsea(res_liver, "liver")
-fgsea_skin <- run_gsea(res_skin, "skin")
+fgsea_brain <- run_gsea(res_brain, "Brain")
+fgsea_liver <- run_gsea(res_liver, "Liver")
+fgsea_skin <- run_gsea(res_skin, "Skin")
 
 # ========================== 10. PCA ==========================================
 
@@ -302,16 +287,6 @@ ggplot(pca_df, aes(x = PC1, y = PC2, color = tissue, shape = time)) +
   labs(title = "PCA of Gene Expression")
 
 # ================= 11. HEATMAP - All Tissues + Time ==========================
-
-circadian_genes <- c(
-  "per1b", "clocka", "nr1d1", "bhlhe40", "cry2", "per2", "per3", "clockb", "cry3a", "cry3b", "timeless"
-)
-
-circadian_ids <- c("ENSDARG00000012499", "ENSDARG00000011703", "ENSDARG00000033160", "ENSDARG00000004060", 
-                   "ENSDARG00000102403", "ENSDARG00000034503", "ENSDARG00000010519", "ENSDARG00000003631", 
-                   "ENSDARG00000069074", "ENSDARG00000091131", "ENSDARG00000078497")
-
-gene_label_map <- setNames(circadian_genes, circadian_ids)
 
 # Plot
 vsd <- vst(dds, blind = FALSE)

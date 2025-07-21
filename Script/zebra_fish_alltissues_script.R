@@ -7,8 +7,9 @@ library('fgsea')
 library('ggplot2')
 library('dplyr')
 library('umap')
-library(ggrepel)
-library(biomaRt)
+library("ggrepel")
+library("biomaRt")
+library("enrichplot")
 
 # ============================= 1. Functions ===================================
 Volcano_plot <- function(df, tissue){
@@ -75,6 +76,25 @@ Volcano_plot <- function(df, tissue){
       legend.text = element_text(size = 11)
     )
 }
+
+# # Dot plot function
+# Dot_plot <- function(datatable) {
+#   # Create dot plot for top 10 enriched pathways
+#   datatable %>%
+#     arrange(padj) %>%
+#     slice_head(n = 10) %>%
+#     mutate(pathway = factor(pathway, levels = rev(pathway))) %>%
+#     ggplot(aes(x = NES, y = pathway, size = -log10(padj), color = padj)) +
+#     geom_point() +
+#     scale_color_gradient(low = "red", high = "blue") +
+#     labs(
+#       title = "Top GSEA Pathways - Brain",
+#       x = "Normalized Enrichment Score (NES)",
+#       y = "Pathway",
+#       size = "-log10(padj)"
+#     ) +
+#     theme_minimal()
+# }
 
 # GSEA function for each tissue type
 run_gsea <- function(res_df, tissue_name) {

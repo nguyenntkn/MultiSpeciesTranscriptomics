@@ -77,7 +77,7 @@ rm(temp_meta_df_list)
 # ======================== 4. Data Exploration =================================
 
 dim(count_data_df) # number of rows and columns
-head(count_data_df) # to see first 5 rows
+head(count_data_df) # to see first 6 rows
 summary(count_data_df) # summary statistics
 colSums(is.na(count_data_df)) # to confirm that this is no missing data
 sum_zero=colSums(count_data_df == 0) # number of rows where expression = zero
